@@ -1,359 +1,345 @@
 package org.example;
 
-import java.nio.file.Path;
 import java.io.FileOutputStream;
+import java.nio.file.Path;
 import java.sql.*;
-import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
 
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 public class Main {
 
-    
+    // ====== БД (как в задании 2) ======
     private static final String DB_URL =
-    "jdbc:mysql://localhost:3306/string_menu?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+            "jdbc:mysql://localhost:3306/string_menu?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+    private static final String DB_USER = "abc";
+    private static final String DB_PASS = "abc123";
+
+    // схема/имена (как раньше)
+    private static final String TABLE = "string_ops_adv";
+    private static final String EXCEL_FILE = "string_ops.xlsx";
+
+    private static final Scanner SC = new Scanner(System.in);
 
     public static void main(String[] args) {
-        System.out.println("""
-                ===============================
-                Строковое меню (advanced) + MySQL + Excel
-                Схема: string_menu, таблица: string_ops_adv
-                ===============================""");
+        // на некоторых JVM помогает избежать "No suitable driver found"
+        try { Class.forName("com.mysql.cj.jdbc.Driver"); } catch (ClassNotFoundException ignored) {}
 
+        println("Строковое меню (advanced)  +  MySQL  +  Excel");
+        println("Схема: string_menu, таблица: " + TABLE);
         while (true) {
             printMenu();
             int choice = readInt("Ваш выбор (0 — выход): ");
-
             switch (choice) {
-                case 0 -> { System.out.println("Выход. До встречи!"); return; }
-                case 1 -> handleListTables();
-                case 2 -> handleEnsureTable();
-                case 3 -> handleSubstring();
-                case 4 -> handleCase();
-                case 5 -> handleSearchEnds();
-                case 6 -> handleExport();
-                default -> System.out.println("Неизвестный пункт меню.");
+                case 0 -> {
+                    println("Выход. До встречи!");
+                    return;
+                }
+                case 1 -> safeRun(Main::listTables);
+                case 2 -> safeRun(Main::ensureTable);
+                case 3 -> safeRun(Main::opSubstringSaveAndPrint);
+                case 4 -> safeRun(Main::opUpperLowerUpdateAndPrint);
+                case 5 -> safeRun(Main::opFindAndEndsWithUpdateAndPrint);
+                case 6 -> safeRun(Main::exportAllToExcel);
+                default -> println("Неизвестный пункт меню.");
             }
-            System.out.println();
         }
     }
 
+    // ---------- Меню ----------
     private static void printMenu() {
-        System.out.println("""
-                ===============================
-                1. Вывести все таблицы из MySQL.
-                2. Создать/проверить таблицу в MySQL.
-                3. Возвращение подстроки по индексам (сохранить и вывести).
-                4. Перевод строк в верхний и нижний регистры (сохранить и вывести).
-                5. Поиск подстроки и проверка окончания (сохранить и вывести).
-                6. Сохранить все данные из MySQL в Excel и вывести на экран.
-                ===============================""");
+        println("\n=================================");
+        println("1. Вывести все таблицы из MySQL.");
+        println("2. Создать/проверить таблицу в MySQL.");
+        println("3. Возвращение подстроки по индексам (сохранить и вывести).");
+        println("4. Перевод строк в верхний и нижний регистры (сохранить и вывести).");
+        println("5. Поиск подстроки и проверка окончания (сохранить и вывести).");
+        println("6. Сохранить все данные из MySQL в Excel и вывести на экран.");
+        println("=================================");
     }
 
-    // ========= Handlers =========
+    // ---------- Пункты меню ----------
+    private static void listTables() throws Exception {
+        try (Connection c = getConn();
+             PreparedStatement ps = c.prepareStatement(
+                     "select table_name from information_schema.tables where table_schema = database() order by table_name");
+             ResultSet rs = ps.executeQuery()) {
 
-    private static void handleListTables() {
-        List<String> tables = Db.listTables();
-        System.out.println("Таблицы в текущей базе:");
-        if (tables.isEmpty()) System.out.println("  — (пусто)");
-        else tables.forEach(t -> System.out.println("  - " + t));
-    }
-
-    private static void handleEnsureTable() {
-        Db.ensureTable();
-        System.out.println("Таблица string_ops_adv создана/проверена.");
-    }
-
-    private static void handleSubstring() {
-        System.out.println("Введите исходную строку:");
-        String source = readLine();
-
-        int from, to;
-        while (true) {
-            from = readInt("from (0-based, включительно): ");
-            to   = readInt("to (0-based, исключая): ");
-            if (0 <= from && from <= to && to <= source.length()) break;
-            System.out.println("Некорректные границы. Диапазон должен удовлетворять 0 <= from <= to <= " + source.length());
+            println("Таблицы в текущей базе:");
+            boolean any = false;
+            while (rs.next()) {
+                any = true;
+                println("  - " + rs.getString(1));
+            }
+            if (!any) println("  — (пусто)");
         }
-
-        String ss = source.substring(from, to);
-        long id = Db.insertSubstring(source, from, to, ss);
-
-        System.out.println("Результат:");
-        System.out.println("  id=" + id + " | op=SUBSTRING | from=" + from + " | to=" + to);
-        System.out.println("  source: " + Db.shortPreview(source));
-        System.out.println("  substring: " + Db.shortPreview(ss));
     }
 
-    private static void handleCase() {
-        System.out.println("Введите исходную строку:");
-        String source = readLine();
-
-        String up = source.toUpperCase();
-        String low = source.toLowerCase();
-        long id = Db.insertCase(source, up, low);
-
-        System.out.println("Результат:");
-        System.out.println("  id=" + id + " | op=CASE");
-        System.out.println("  source: " + Db.shortPreview(source));
-        System.out.println("  upper : " + Db.shortPreview(up));
-        System.out.println("  lower : " + Db.shortPreview(low));
+    private static void ensureTable() throws Exception {
+        String sql = """
+                create table if not exists %s (
+                  id           bigint primary key auto_increment,
+                  created_at   timestamp default current_timestamp,
+                  src          text not null,
+                  sub_from     int,
+                  sub_to       int,
+                  substring_res text,
+                  upper_res    text,
+                  lower_res    text,
+                  find_query   varchar(255),
+                  find_pos     int,
+                  ends_suffix  varchar(255),
+                  ends_with    boolean
+                ) engine=InnoDB default charset=utf8mb4;
+                """.formatted(TABLE);
+        try (Connection c = getConn(); Statement st = c.createStatement()) {
+            st.execute(sql);
+            println("Таблица %s создана/проверена.".formatted(TABLE));
+        }
     }
 
-    private static void handleSearchEnds() {
-        System.out.println("Введите исходную строку:");
-        String source = readLine();
-        System.out.println("Введите искомую подстроку:");
-        String query = readLine();
+    // 3) Подстрока: ввод -> вычислить -> СОХРАНИТЬ строкой -> вывести
+    private static void opSubstringSaveAndPrint() throws Exception {
+        ensureTable();
+        String src = readLine("Введите исходную строку (>= 50 символов): ");
+        while (src.length() < 50) {
+            println("Строка короче 50 символов, попробуйте ещё раз.");
+            src = readLine("Введите исходную строку (>= 50 символов): ");
+        }
+        int n = src.length();
+        println("Длина исходной строки: " + n + ". Индексы Java: 0.."+(n-1)+". Конец НЕ включается.");
+        int from = readInt("Введите from (0.."+n+"): ");
+        int to   = readInt("Введите to   (from.."+n+"): ");
 
-        int pos = source.indexOf(query);          // -1 если не нашлось
-        boolean ends = source.endsWith(query);
+        // нормализуем
+        if (from < 0) from = 0;
+        if (to < 0)   to = 0;
+        if (from > n) from = n;
+        if (to > n)   to = n;
+        if (to < from) { int t = from; from = to; to = t; }
 
-        long id = Db.insertSearchEnds(source, query, pos, ends);
+        String sub = src.substring(from, to);
+        println("substring(" + from + ", " + to + "):");
+        println(sub);
 
-        System.out.println("Результат:");
-        System.out.println("  id=" + id + " | op=SEARCH_ENDS");
-        System.out.println("  source: " + Db.shortPreview(source));
-        System.out.println("  query : " + Db.shortPreview(query));
-        System.out.println("  found_pos=" + pos + " | ends_with=" + ends);
+        try (Connection c = getConn();
+             PreparedStatement ps = c.prepareStatement(
+                     "insert into " + TABLE + " (src, sub_from, sub_to, substring_res) values (?,?,?,?)",
+                     Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, src);
+            ps.setInt(2, from);
+            ps.setInt(3, to);
+            ps.setString(4, sub);
+            ps.executeUpdate();
+            long id = fetchGeneratedId(ps);
+            println("Сохранено как запись id=" + id + ".");
+        }
     }
 
-    private static void handleExport() {
-        List<LinkedHashMap<String, Object>> rows = Db.fetchAllForExport();
-        if (rows.isEmpty()) {
-            System.out.println("В таблице пока нет записей.");
+    // 4) Верхний/нижний регистр над ПОСЛЕДНЕЙ записью -> update -> вывести
+    private static void opUpperLowerUpdateAndPrint() throws Exception {
+        ensureTable();
+        Row r = fetchLastRow();
+        if (r == null) {
+            println("Нет данных. Сначала выполните пункт 3 (подстрока).");
             return;
         }
-        try {
-            Path path = ExcelExporter.export(rows, "string_ops_adv.xlsx");
-            System.out.println("Экспортировано строк: " + rows.size());
-            System.out.println("Файл: " + path.toAbsolutePath());
+        String upper = r.src.toUpperCase();
+        String lower = r.src.toLowerCase();
 
-            System.out.println("\nПредпросмотр:");
-            int i = 1;
-            for (var r : rows) {
-                System.out.printf("#%d | id=%s | %s | source=%s%n",
-                        i++, r.get("id"), r.get("op_type"),
-                        Db.shortPreview((String) r.get("source_text")));
+        try (Connection c = getConn();
+             PreparedStatement ps = c.prepareStatement(
+                     "update " + TABLE + " set upper_res=?, lower_res=? where id=?")) {
+            ps.setString(1, upper);
+            ps.setString(2, lower);
+            ps.setLong(3, r.id);
+            ps.executeUpdate();
+        }
+        println("UPPER(src):\n" + upper);
+        println("LOWER(src):\n" + lower);
+        println("Запись обновлена (id=" + r.id + ").");
+    }
+
+    // 5) Поиск подстроки + endsWith над ПОСЛЕДНЕЙ записью -> update -> вывести
+    private static void opFindAndEndsWithUpdateAndPrint() throws Exception {
+        ensureTable();
+        Row r = fetchLastRow();
+        if (r == null) {
+            println("Нет данных. Сначала выполните пункт 3 (подстрока).");
+            return;
+        }
+        String needle = readLine("Что ищем в src (find_query)? ");
+        String suffix = readLine("Чем должна заканчиваться src (ends_suffix)? ");
+
+        int pos = r.src.indexOf(needle);        // -1 если не найдено
+        boolean ends = r.src.endsWith(suffix);
+
+        try (Connection c = getConn();
+             PreparedStatement ps = c.prepareStatement(
+                     "update " + TABLE +
+                     " set find_query=?, find_pos=?, ends_suffix=?, ends_with=? where id=?")) {
+            ps.setString(1, needle);
+            ps.setInt(2, pos);
+            ps.setString(3, suffix);
+            ps.setBoolean(4, ends);
+            ps.setLong(5, r.id);
+            ps.executeUpdate();
+        }
+
+        println("Результаты:");
+        println(" indexOf(\"" + needle + "\") = " + pos);
+        println(" endsWith(\"" + suffix + "\") = " + ends);
+        println("Запись обновлена (id=" + r.id + ").");
+    }
+
+    // 6) Экспорт всех строк таблицы в Excel
+    private static void exportAllToExcel() throws Exception {
+        ensureTable();
+        List<Row> rows = new ArrayList<>();
+        try (Connection c = getConn();
+             PreparedStatement ps = c.prepareStatement("select * from " + TABLE + " order by id");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) rows.add(map(rs));
+        }
+
+        try (Workbook wb = new XSSFWorkbook()) {
+            Sheet sh = wb.createSheet("data");
+            int r = 0;
+            RowExcel(sh, r++, "id","created_at","src","sub_from","sub_to","substring_res",
+                    "upper_res","lower_res","find_query","find_pos","ends_suffix","ends_with");
+
+            DateTimeFormatter dt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+            for (Row row : rows) {
+                org.apache.poi.ss.usermodel.Row e = sh.createRow(r++);
+                int c = 0;
+                e.createCell(c++).setCellValue(row.id);
+                e.createCell(c++).setCellValue(row.createdAt == null ? "" : row.createdAt);
+                e.createCell(c++).setCellValue(row.src == null ? "" : row.src);
+                e.createCell(c++).setCellValue(row.subFrom == null ? "" : String.valueOf(row.subFrom));
+                e.createCell(c++).setCellValue(row.subTo == null ? "" : String.valueOf(row.subTo));
+                e.createCell(c++).setCellValue(row.substringRes == null ? "" : row.substringRes);
+                e.createCell(c++).setCellValue(row.upperRes == null ? "" : row.upperRes);
+                e.createCell(c++).setCellValue(row.lowerRes == null ? "" : row.lowerRes);
+                e.createCell(c++).setCellValue(row.findQuery == null ? "" : row.findQuery);
+                e.createCell(c++).setCellValue(row.findPos == null ? "" : String.valueOf(row.findPos));
+                e.createCell(c++).setCellValue(row.endsSuffix == null ? "" : row.endsSuffix);
+                e.createCell(c++).setCellValue(row.endsWith == null ? "" : String.valueOf(row.endsWith));
             }
-        } catch (Exception e) {
-            System.out.println("Ошибка экспорта: " + e.getMessage());
+            for (int i = 0; i < 12; i++) sh.autoSizeColumn(i);
+
+            Path out = Path.of(EXCEL_FILE).toAbsolutePath();
+            try (FileOutputStream fos = new FileOutputStream(out.toFile())) {
+                wb.write(fos);
+            }
+            println("Экспорт завершён: " + out);
         }
     }
 
-    // ========= Ввод-утилиты =========
+    private static void RowExcel(Sheet sh, int row, String... headers) {
+        org.apache.poi.ss.usermodel.Row r = sh.createRow(row);
+        for (int i = 0; i < headers.length; i++) {
+            r.createCell(i).setCellValue(headers[i]);
+        }
+    }
+
+    // ---------- Вспомогательное ----------
+    private static Connection getConn() throws SQLException {
+        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+    }
+
+    private static long fetchGeneratedId(PreparedStatement ps) throws SQLException {
+        try (ResultSet rs = ps.getGeneratedKeys()) {
+            if (rs.next()) return rs.getLong(1);
+            return -1;
+        }
+    }
+
+    private static Row fetchLastRow() throws SQLException {
+        try (Connection c = getConn();
+             PreparedStatement ps = c.prepareStatement(
+                     "select * from " + TABLE + " order by id desc limit 1");
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) return map(rs);
+            return null;
+        }
+    }
+
+    private static Row map(ResultSet rs) throws SQLException {
+        Row r = new Row();
+        r.id = rs.getLong("id");
+        Timestamp ts = rs.getTimestamp("created_at");
+        r.createdAt = ts == null ? null : ts.toLocalDateTime().toString();
+        r.src = rs.getString("src");
+        r.subFrom = getIntOrNull(rs, "sub_from");
+        r.subTo = getIntOrNull(rs, "sub_to");
+        r.substringRes = rs.getString("substring_res");
+        r.upperRes = rs.getString("upper_res");
+        r.lowerRes = rs.getString("lower_res");
+        r.findQuery = rs.getString("find_query");
+        r.findPos = getIntOrNull(rs, "find_pos");
+        r.endsSuffix = rs.getString("ends_suffix");
+        Object b = rs.getObject("ends_with");
+        r.endsWith = (b == null) ? null : rs.getBoolean("ends_with");
+        return r;
+    }
+
+    private static Integer getIntOrNull(ResultSet rs, String col) throws SQLException {
+        int v = rs.getInt(col);
+        return rs.wasNull() ? null : v;
+    }
+
+    private static String readLine(String prompt) {
+        System.out.print(prompt);
+        return SC.nextLine();
+    }
 
     private static int readInt(String prompt) {
         while (true) {
             System.out.print(prompt);
-            String s = in.nextLine().trim();
+            String s = SC.nextLine().trim();
             try { return Integer.parseInt(s); }
-            catch (NumberFormatException e) { System.out.println("Введите целое число."); }
+            catch (Exception e) { System.out.println("Нужно целое число."); }
         }
     }
 
-    private static String readLine() {
-        String s = in.nextLine();
-        while (s == null || s.isEmpty()) {
-            // защищаемся от случайного пустого ввода
-            s = in.nextLine();
+    private static void println(String s) { System.out.println(s); }
+
+    private static void safeRun(ThrowingRunnable r) {
+        try { r.run(); }
+        catch (SQLIntegrityConstraintViolationException e) {
+            println("SQL-ошибка: " + e.getMessage());
         }
-        return s;
-    }
-
-    // ========= Встроенный класс работы с БД =========
-    static class Db {
-        
-        private static final String DB_URL  =
-                "jdbc:mysql://localhost:3306/string_menu?useSSL=false&serverTimezone=UTC";
-        private static final String DB_USER = "abc";
-        private static final String DB_PASS = "abc123";
-
-        static Connection getConnection() throws SQLException {
-            return DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+        catch (SQLSyntaxErrorException e) {
+            println("SQL синтаксис: " + e.getMessage());
         }
-
-        static List<String> listTables() {
-            List<String> tables = new ArrayList<>();
-            String sql = "SHOW TABLES";
-            try (Connection c = getConnection();
-                 Statement st = c.createStatement();
-                 ResultSet rs = st.executeQuery(sql)) {
-                while (rs.next()) tables.add(rs.getString(1));
-            } catch (SQLException e) {
-                System.out.println("Ошибка при получении списка таблиц: " + e.getMessage());
-            }
-            return tables;
+        catch (SQLException e) {
+            println("SQL: " + e.getMessage());
         }
-
-        static void ensureTable() {
-            final String ddl = """
-                CREATE TABLE IF NOT EXISTS string_ops_adv (
-                  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
-                  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  op_type      VARCHAR(40) NOT NULL,
-                  source_text  TEXT,
-                  from_idx     INT NULL,
-                  to_idx       INT NULL,
-                  substring    TEXT NULL,
-                  upper_text   TEXT NULL,
-                  lower_text   TEXT NULL,
-                  query_text   TEXT NULL,
-                  found_pos    INT NULL,
-                  ends_with    BOOLEAN NULL,
-                  note         VARCHAR(255) NULL
-                )
-                """;
-            try (Connection c = getConnection(); Statement st = c.createStatement()) {
-                st.executeUpdate(ddl);
-            } catch (SQLException e) {
-                System.out.println("Ошибка при создании таблицы: " + e.getMessage());
-            }
-        }
-
-        static long insertSubstring(String source, int from, int to, String substr) {
-            String sql = """
-                INSERT INTO string_ops_adv
-                (op_type, source_text, from_idx, to_idx, substring)
-                VALUES ('SUBSTRING', ?, ?, ?, ?)
-                """;
-            try (Connection c = getConnection();
-                 PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-                ps.setString(1, source);
-                ps.setInt(2, from);
-                ps.setInt(3, to);
-                ps.setString(4, substr);
-                ps.executeUpdate();
-                try (ResultSet keys = ps.getGeneratedKeys()) {
-                    if (keys.next()) return keys.getLong(1);
-                }
-            } catch (SQLException e) {
-                System.out.println("Ошибка insertSubstring: " + e.getMessage());
-            }
-            return -1L;
-        }
-
-        static long insertCase(String source, String up, String low) {
-            String sql = """
-                INSERT INTO string_ops_adv
-                (op_type, source_text, upper_text, lower_text)
-                VALUES ('CASE', ?, ?, ?)
-                """;
-            try (Connection c = getConnection();
-                 PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-                ps.setString(1, source);
-                ps.setString(2, up);
-                ps.setString(3, low);
-                ps.executeUpdate();
-                try (ResultSet keys = ps.getGeneratedKeys()) {
-                    if (keys.next()) return keys.getLong(1);
-                }
-            } catch (SQLException e) {
-                System.out.println("Ошибка insertCase: " + e.getMessage());
-            }
-            return -1L;
-        }
-
-        static long insertSearchEnds(String source, String query, int pos, boolean ends) {
-            String sql = """
-                INSERT INTO string_ops_adv
-                (op_type, source_text, query_text, found_pos, ends_with)
-                VALUES ('SEARCH_ENDS', ?, ?, ?, ?)
-                """;
-            try (Connection c = getConnection();
-                 PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-                ps.setString(1, source);
-                ps.setString(2, query);
-                ps.setInt(3, pos);
-                ps.setBoolean(4, ends);
-                ps.executeUpdate();
-                try (ResultSet keys = ps.getGeneratedKeys()) {
-                    if (keys.next()) return keys.getLong(1);
-                }
-            } catch (SQLException e) {
-                System.out.println("Ошибка insertSearchEnds: " + e.getMessage());
-            }
-            return -1L;
-        }
-
-        static List<LinkedHashMap<String, Object>> fetchAllForExport() {
-            String sql = "SELECT * FROM string_ops_adv ORDER BY id";
-            List<LinkedHashMap<String, Object>> rows = new ArrayList<>();
-            try (Connection c = getConnection();
-                 Statement st = c.createStatement();
-                 ResultSet rs = st.executeQuery(sql)) {
-
-                ResultSetMetaData md = rs.getMetaData();
-                int colCount = md.getColumnCount();
-
-                while (rs.next()) {
-                    LinkedHashMap<String, Object> row = new LinkedHashMap<>();
-                    for (int i = 1; i <= colCount; i++) {
-                        String col = md.getColumnLabel(i);
-                        Object val = rs.getObject(i);
-                        row.put(col, val);
-                    }
-                    rows.add(row);
-                }
-            } catch (SQLException e) {
-                System.out.println("Ошибка select: " + e.getMessage());
-            }
-            return rows;
-        }
-
-        static String shortPreview(String s) {
-            if (s == null) return "null";
-            return (s.length() <= 40) ? s : s.substring(0, 37) + "...";
+        catch (Exception e) {
+            println("Ошибка: " + e.getMessage());
         }
     }
 
-    // ========= Встроенный класс экспорта в Excel =========
-    static class ExcelExporter {
-        private static final String[] COLS = new String[] {
-                "id","created_at","op_type","source_text",
-                "from_idx","to_idx","substring",
-                "upper_text","lower_text",
-                "query_text","found_pos","ends_with","note"
-        };
+    @FunctionalInterface interface ThrowingRunnable { void run() throws Exception; }
 
-        static Path export(List<LinkedHashMap<String, Object>> rows, String fileName) throws Exception {
-            try (Workbook wb = new XSSFWorkbook()) {
-                Sheet sheet = wb.createSheet("string_ops_adv");
-
-                // Заголовок
-                Row header = sheet.createRow(0);
-                CellStyle bold = wb.createCellStyle();
-                Font f = wb.createFont(); f.setBold(true); bold.setFont(f);
-                for (int i = 0; i < COLS.length; i++) {
-                    Cell c = header.createCell(i);
-                    c.setCellValue(COLS[i]);
-                    c.setCellStyle(bold);
-                }
-
-                // Данные
-                AtomicInteger r = new AtomicInteger(1);
-                for (LinkedHashMap<String, Object> row : rows) {
-                    Row x = sheet.createRow(r.getAndIncrement());
-                    for (int i = 0; i < COLS.length; i++) {
-                        Object val = row.get(COLS[i]);
-                        Cell c = x.createCell(i);
-                        if (val == null) c.setBlank();
-                        else if (val instanceof Number num) c.setCellValue(num.doubleValue());
-                        else if (val instanceof Boolean b) c.setCellValue(b);
-                        else c.setCellValue(String.valueOf(val));
-                    }
-                }
-
-                for (int i = 0; i < COLS.length; i++) sheet.autoSizeColumn(i);
-
-                Path path = Path.of(fileName);
-                try (FileOutputStream fos = new FileOutputStream(path.toFile())) {
-                    wb.write(fos);
-                }
-                return path;
-            }
-        }
+    // простая модель строки таблицы
+    private static class Row {
+        long id;
+        String createdAt;
+        String src;
+        Integer subFrom;
+        Integer subTo;
+        String substringRes;
+        String upperRes;
+        String lowerRes;
+        String findQuery;
+        Integer findPos;
+        String endsSuffix;
+        Boolean endsWith;
     }
 }
