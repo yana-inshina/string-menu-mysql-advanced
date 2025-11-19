@@ -13,20 +13,20 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 public class Main {
 
-    // ====== БД (как в задании 2) ======
+    // ====== БД ======
     private static final String DB_URL =
             "jdbc:mysql://localhost:3306/string_menu?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
-    private static final String DB_USER = "abc";
-    private static final String DB_PASS = "abc123";
+    private static final String DB_USER = "app";
+    private static final String DB_PASS = "app123";
 
-    // схема/имена (как раньше)
+    // схема/имена 
     private static final String TABLE = "string_ops_adv";
     private static final String EXCEL_FILE = "string_ops.xlsx";
 
     private static final Scanner SC = new Scanner(System.in);
 
     public static void main(String[] args) {
-        // на некоторых JVM помогает избежать "No suitable driver found"
+        
         try { Class.forName("com.mysql.cj.jdbc.Driver"); } catch (ClassNotFoundException ignored) {}
 
         println("Строковое меню (advanced)  +  MySQL  +  Excel");
