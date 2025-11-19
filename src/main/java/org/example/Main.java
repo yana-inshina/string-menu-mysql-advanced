@@ -12,7 +12,8 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 public class Main {
 
     
-    private static final Scanner in = new Scanner(System.in);
+    private static final String DB_URL =
+    "jdbc:mysql://localhost:3306/string_menu?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
 
     public static void main(String[] args) {
         System.out.println("""
